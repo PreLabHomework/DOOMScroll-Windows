@@ -1,73 +1,134 @@
 $ErrorActionPreference = "Stop"
+
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ClaudeDir = Join-Path $HOME ".claude"
 $SettingsFile = Join-Path $ClaudeDir "settings.json"
-$BackupFile = Join-Path $ClaudeDir ("settings.backup-doomprompting-win-{0}.json" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+$BackupFile = Join-Path $ClaudeDir ("settings.backup-doomscroll-win-{0}.json" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
 
 New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "config") | Out-Null
-if (!(Test-Path (Join-Path $Root "config\enabled"))) { New-Item -ItemType File -Path (Join-Path $Root "config\enabled") | Out-Null }
-if (!(Test-Path (Join-Path $Root "config\urls.txt"))) {
+
+$EnabledFile = Join-Path $Root "config\enabled"
+$UrlsFile = Join-Path $Root "config\urls.txt"
+
+if (!(Test-Path $EnabledFile)) {
+    New-Item -ItemType File -Path $EnabledFile | Out-Null
+}
+
+if (!(Test-Path $UrlsFile)) {
 @"
 https://www.youtube.com/shorts
 https://www.instagram.com/reels/
 https://www.tiktok.com
 https://reddit.com
-"@ | Set-Content -Path (Join-Path $Root "config\urls.txt") -Encoding UTF8
+"@ | Set-Content -Path $UrlsFile -Encoding UTF8
 }
 
 function ConvertTo-Hashtable($obj) {
     if ($null -eq $obj) { return @{} }
+
+    if ($obj -is [System.Collections.IDictionary]) {
+        $hash = @{}
+        foreach ($key in $obj.Keys) {
+            $hash[$key] = ConvertTo-Hashtable $obj[$key]
+        }
+        return $hash
+    }
+
     if ($obj -is [System.Collections.IEnumerable] -and $obj -isnot [string] -and $obj -isnot [pscustomobject]) {
         return @($obj | ForEach-Object { ConvertTo-Hashtable $_ })
     }
+
     if ($obj -is [pscustomobject]) {
         $hash = @{}
-        foreach ($p in $obj.PSObject.Properties) { $hash[$p.Name] = ConvertTo-Hashtable $p.Value }
+        foreach ($p in $obj.PSObject.Properties) {
+            $hash[$p.Name] = ConvertTo-Hashtable $p.Value
+        }
         return $hash
     }
+
     return $obj
 }
 
 if (Test-Path $SettingsFile) {
     Copy-Item $SettingsFile $BackupFile
-    $settings = ConvertTo-Hashtable (Get-Content $SettingsFile -Raw | ConvertFrom-Json)
+    $raw = Get-Content $SettingsFile -Raw
+
+    if ($raw.Trim().Length -eq 0) {
+        $settings = @{}
+    } else {
+        $settings = ConvertTo-Hashtable ($raw | ConvertFrom-Json)
+    }
 } else {
     $settings = @{}
 }
 
-if (!$settings.ContainsKey("hooks")) { $settings["hooks"] = @{} }
-foreach ($event in @("UserPromptSubmit", "Stop")) {
-    if (!$settings["hooks"].ContainsKey($event) -or $null -eq $settings["hooks"][$event]) { $settings["hooks"][$event] = @() }
+if (!$settings.ContainsKey("hooks") -or $null -eq $settings["hooks"]) {
+    $settings["hooks"] = @{}
 }
 
-$openScript = (Join-Path $Root "scripts\open-media.ps1").Replace("\", "\\")
-$closeScript = (Join-Path $Root "scripts\close-media.ps1").Replace("\", "\\")
+$openScript = Join-Path $Root "scripts\open-media.ps1"
+$closeScript = Join-Path $Root "scripts\close-media.ps1"
+
+if (!(Test-Path $openScript)) {
+    throw "Missing script: $openScript"
+}
+
+if (!(Test-Path $closeScript)) {
+    throw "Missing script: $closeScript"
+}
+
 $openCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$openScript`""
 $closeCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$closeScript`""
 
 function Remove-DoomHook($arr) {
     return @($arr | Where-Object {
         $json = ($_ | ConvertTo-Json -Depth 10 -Compress)
-        $json -notmatch "DoomPrompting" -and $json -notmatch "open-media\.ps1" -and $json -notmatch "close-media\.ps1"
+        $json -notmatch "DOOMScroll" -and
+        $json -notmatch "DoomPrompting" -and
+        $json -notmatch "open-media\.ps1" -and
+        $json -notmatch "close-media\.ps1"
     })
 }
 
-$settings["hooks"]["UserPromptSubmit"] = Remove-DoomHook $settings["hooks"]["UserPromptSubmit"]
-$settings["hooks"]["Stop"] = Remove-DoomHook $settings["hooks"]["Stop"]
+$eventsToClean = @("UserPromptSubmit", "Stop", "StopFailure", "SessionEnd")
+
+foreach ($event in $eventsToClean) {
+    if (!$settings["hooks"].ContainsKey($event) -or $null -eq $settings["hooks"][$event]) {
+        $settings["hooks"][$event] = @()
+    }
+
+    $settings["hooks"][$event] = Remove-DoomHook $settings["hooks"][$event]
+}
 
 $settings["hooks"]["UserPromptSubmit"] += @{
     matcher = ""
-    hooks = @(@{ type = "command"; command = $openCommand })
+    hooks = @(
+        @{
+            type = "command"
+            command = $openCommand
+        }
+    )
 }
-$settings["hooks"]["Stop"] += @{
-    matcher = ""
-    hooks = @(@{ type = "command"; command = $closeCommand })
+
+foreach ($event in @("Stop", "StopFailure", "SessionEnd")) {
+    $settings["hooks"][$event] += @{
+        matcher = ""
+        hooks = @(
+            @{
+                type = "command"
+                command = $closeCommand
+            }
+        )
+    }
 }
 
 $settings | ConvertTo-Json -Depth 20 | Set-Content $SettingsFile -Encoding UTF8
 
-Write-Host "Installed DoomPrompting Windows hooks."
+Write-Host "Installed DOOMScroll Windows hooks."
 Write-Host "Settings: $SettingsFile"
-if (Test-Path $BackupFile) { Write-Host "Backup: $BackupFile" }
+if (Test-Path $BackupFile) {
+    Write-Host "Backup: $BackupFile"
+}
+Write-Host "Installed hooks: UserPromptSubmit, Stop, StopFailure, SessionEnd"
 Write-Host "Restart Claude Code."

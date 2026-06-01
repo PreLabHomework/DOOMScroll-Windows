@@ -13,7 +13,7 @@ This project is a Windows port inspired by the original macOS DoomPrompting proj
 3. Claude finishes responding.
 4. The distraction windows close automatically.
 
-This version uses a separate temporary Chrome profile so it should not close your normal Chrome tabs.
+This version uses separate temporary Chrome profiles so it should not close your normal Chrome tabs.
 
 ## Requirements
 
@@ -32,6 +32,7 @@ DOOMScroll-Windows/
   install.ps1
   uninstall.ps1
   doom.ps1
+  .gitignore
   scripts/
     open-media.ps1
     close-media.ps1
@@ -46,6 +47,8 @@ The `enabled` file is intentionally empty. It acts as an on/off flag.
 config/enabled exists = DOOMScroll is ON
 config/enabled missing = DOOMScroll is OFF
 ```
+
+Do not commit local Claude settings, runtime Chrome profile files, logs, or session history.
 
 ## Installation
 
@@ -70,8 +73,12 @@ The hooks are:
 
 ```text
 UserPromptSubmit -> scripts/open-media.ps1
-Stop -> scripts/close-media.ps1
+Stop             -> scripts/close-media.ps1
+StopFailure      -> scripts/close-media.ps1
+SessionEnd       -> scripts/close-media.ps1
 ```
+
+`StopFailure` is important because it closes the windows even when Claude exits with an error or rate-limit message.
 
 ## Test before using
 
@@ -82,9 +89,17 @@ After installing, test that the media windows open and close correctly:
 .\doom.ps1 close-test
 ```
 
-If the first command opens Chrome windows and the second command closes them, the setup is working.
+If the first command opens Chrome windows and the second command closes them, the Chrome side is working.
+
+To test Claude automation, open Claude Code and send a normal prompt. The windows should open when you submit the prompt and close when Claude finishes.
 
 ## Commands
+
+Check whether DOOMScroll is on or off:
+
+```powershell
+.\doom.ps1 status
+```
 
 Show all URLs:
 
@@ -120,6 +135,18 @@ Turn DOOMScroll on or off globally:
 
 ```powershell
 .\doom.ps1 toggle
+```
+
+Turn it on directly:
+
+```powershell
+.\doom.ps1 on
+```
+
+Turn it off directly:
+
+```powershell
+.\doom.ps1 off
 ```
 
 Show recent sessions:
@@ -207,17 +234,25 @@ That script opens the URLs from:
 config/urls.txt
 ```
 
-When Claude finishes responding, Claude runs the `Stop` hook. DOOMScroll uses that hook to run:
+When Claude finishes responding normally, Claude runs the `Stop` hook. DOOMScroll uses that hook to run:
 
 ```text
 scripts/close-media.ps1
 ```
 
-That script closes the Chrome windows created by DOOMScroll.
+When Claude fails, errors, or hits a rate limit, Claude can run the `StopFailure` hook. DOOMScroll points that hook to the same close script so the Chrome windows are still cleaned up.
+
+When the Claude session exits, `SessionEnd` also points to the close script as a final cleanup path.
 
 ## Safety note
 
-This project opens Chrome using a separate temporary profile. It is designed to close only the Chrome instance it created, not your regular Chrome session.
+This project opens Chrome using separate temporary profiles inside:
+
+```text
+config/runtime/
+```
+
+It is designed to close only Chrome processes created with DOOMScroll temporary profiles, not your regular Chrome session.
 
 Still, test with:
 
@@ -266,6 +301,14 @@ Then check that this file exists:
 
 and contains DOOMScroll hook entries.
 
+You can also open Claude Code and run:
+
+```text
+/hooks
+```
+
+The menu should show the installed hook events.
+
 ### The windows open but do not close
 
 Run this manually:
@@ -281,6 +324,27 @@ If that works manually but not through Claude Code, reinstall the hooks:
 ```
 
 Then restart Claude Code.
+
+Make sure the installed hooks include:
+
+```text
+Stop
+StopFailure
+SessionEnd
+```
+
+### GitHub cleanup
+
+Do not commit these local/generated files:
+
+```text
+.claude/
+config/runtime/
+config/sessions.log
+*.log
+```
+
+They are ignored by `.gitignore`.
 
 ## Uninstall
 
