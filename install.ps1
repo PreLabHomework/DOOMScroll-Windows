@@ -91,6 +91,18 @@ function Remove-DoomHook($arr) {
     })
 }
 
+function New-ClaudeCommandHook($command) {
+    return [ordered]@{
+        matcher = ""
+        hooks = @(
+            [ordered]@{
+                type = "command"
+                command = $command
+            }
+        )
+    }
+}
+
 $eventsToClean = @("UserPromptSubmit", "Stop", "StopFailure", "SessionEnd")
 
 foreach ($event in $eventsToClean) {
@@ -98,29 +110,18 @@ foreach ($event in $eventsToClean) {
         $settings["hooks"][$event] = @()
     }
 
-    $settings["hooks"][$event] = Remove-DoomHook $settings["hooks"][$event]
+    $settings["hooks"][$event] = @(Remove-DoomHook $settings["hooks"][$event])
 }
 
-$settings["hooks"]["UserPromptSubmit"] += @{
-    matcher = ""
-    hooks = @(
-        @{
-            type = "command"
-            command = $openCommand
-        }
-    )
-}
+$openHook = New-ClaudeCommandHook $openCommand
+$closeHook = New-ClaudeCommandHook $closeCommand
+
+# Claude requires each hook event to be an array of matcher objects.
+# The @(... + @($hook)) pattern prevents PowerShell from collapsing a single hook into a plain object.
+$settings["hooks"]["UserPromptSubmit"] = @(@($settings["hooks"]["UserPromptSubmit"]) + @($openHook))
 
 foreach ($event in @("Stop", "StopFailure", "SessionEnd")) {
-    $settings["hooks"][$event] += @{
-        matcher = ""
-        hooks = @(
-            @{
-                type = "command"
-                command = $closeCommand
-            }
-        )
-    }
+    $settings["hooks"][$event] = @(@($settings["hooks"][$event]) + @($closeHook))
 }
 
 $settings | ConvertTo-Json -Depth 20 | Set-Content $SettingsFile -Encoding UTF8
