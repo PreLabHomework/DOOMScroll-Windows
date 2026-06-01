@@ -1,0 +1,5 @@
+.claude/
+config/runtime/
+config/sessions.log
+*.log
+.DS_Store
